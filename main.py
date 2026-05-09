@@ -345,7 +345,7 @@ def borrar_manga(manga_id: str):
     return {"mensaje": f"Manga {manga_id} eliminado correctamente"}
 
 
-@app.get("/ping")
+@app.api_route("/ping", methods=["GET", "HEAD"])
 def ping(token: str = ""):
     expected = os.getenv("PING_TOKEN", "")
     if token != expected:
