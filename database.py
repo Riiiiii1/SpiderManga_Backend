@@ -2,7 +2,8 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
-
+from dotenv import load_dotenv
+load_dotenv()
 # Lee de variable de entorno (configúrala en Render como DATABASE_URL)
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

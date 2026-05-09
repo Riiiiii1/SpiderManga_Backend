@@ -1,4 +1,5 @@
 import json
+import os
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from sse_starlette.sse import EventSourceResponse
 from psycopg2.extras import RealDictCursor
@@ -342,3 +343,11 @@ def borrar_manga(manga_id: str):
         raise HTTPException(status_code=404, detail="Manga no encontrado")
 
     return {"mensaje": f"Manga {manga_id} eliminado correctamente"}
+
+
+@app.get("/ping")
+def ping(token: str = ""):
+    expected = os.getenv("PING_TOKEN", "")
+    if token != expected:
+        raise HTTPException(status_code=401, detail="No autorizado")
+    return {"status": "awake"}
