@@ -187,3 +187,66 @@ def _get_con_retry(url: str, params: dict, intentos: int = 3) -> requests.Respon
             if intento < intentos:
                 time.sleep(2 * intento)  # espera 2s, 4s entre reintentos
     raise Exception(f"❌ No se pudo conectar a {url} tras {intentos} intentos")
+
+
+def obtener_capitulos_recientes() -> list[dict]:
+    """
+    Scrapea el home de InManga y devuelve los capítulos recientes.
+    Cada item tiene: manga_uuid, manga_nombre, cap_numero, cap_uuid
+    """
+    try:
+        response = _get_con_retry(
+            "https://inmanga.com/chapter/getRecentChapters",
+            params={}
+        )
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Cada capítulo reciente está en un <a href="/ver/manga/...">
+        links = soup.find_all("a", href=lambda h: h and "/ver/manga/" in h)
+        
+        vistos = set()
+        resultados = []
+
+        for link in links:
+            href = link.get("href", "")
+            partes = href.strip("/").split("/")
+
+            # /ver/manga/{nombre}/{numero}/{cap_uuid}
+            if len(partes) < 5:
+                continue
+
+            cap_uuid     = partes[-1]
+            cap_numero   = partes[-2]
+            manga_nombre = partes[-3].replace("-", " ")
+
+            # UUID del manga está en la imagen
+            img = link.find("img", class_="ImageContainer")
+            if not img:
+                continue
+
+            src = img.get("src", "")
+            # src: .../i/m/{manga_uuid}/t/o/...
+            src_partes = src.split("/")
+            try:
+                manga_uuid = src_partes[src_partes.index("m") + 1]
+            except (ValueError, IndexError):
+                continue
+
+            # Evitar duplicados
+            key = f"{manga_uuid}_{cap_uuid}"
+            if key in vistos:
+                continue
+            vistos.add(key)
+
+            resultados.append({
+                "manga_uuid":   manga_uuid,
+                "manga_nombre": manga_nombre,
+                "cap_numero":   cap_numero,
+                "cap_uuid":     cap_uuid,
+            })
+
+        return resultados
+
+    except Exception as e:
+        print(f"❌ Error obteniendo capítulos recientes: {e}")
+        return []

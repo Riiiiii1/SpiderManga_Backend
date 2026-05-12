@@ -303,6 +303,32 @@ def capitulo_anterior(manga_id: str, numero: float):
         "paginas":       cap["urls_imagenes"]
     }
 
+@app.get("/novedades")
+def novedades():
+    """
+    Devuelve los mangas con capítulos actualizados
+    ordenados por el capítulo más reciente.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT DISTINCT m.id_inmanga, m.nombre, m.portada_url, m.estado,
+                   MAX(c.updated_at) as ultimo_capitulo,
+                   MAX(c.numero) as ultimo_numero
+            FROM mangas m
+            JOIN capitulos c ON c.manga_id = m.id_inmanga
+            GROUP BY m.id_inmanga, m.nombre, m.portada_url, m.estado
+            ORDER BY ultimo_capitulo DESC
+            LIMIT 20;
+        """)
+        resultados = cursor.fetchall()
+
+    return {
+        "total": len(resultados),
+        "resultados": resultados
+    }
+
+
 
 
 # ──────────────────────────────────────────
@@ -351,3 +377,69 @@ def ping(token: str = ""):
     if token != expected:
         raise HTTPException(status_code=401, detail="No autorizado")
     return {"status": "awake"}
+
+@app.post("/admin/actualizar-novedades")
+def actualizar_novedades(background_tasks: BackgroundTasks):
+    """
+    Cron job: obtiene capítulos recientes de InManga
+    y actualiza solo los mangas que ya están en BD.
+    """
+    background_tasks.add_task(_actualizar_novedades_task)
+    return {"mensaje": "Actualización de novedades iniciada en background"}
+
+
+def _actualizar_novedades_task():
+    from spider import obtener_capitulos_recientes, generar_urls_capitulo
+
+    recientes = obtener_capitulos_recientes()
+    print(f"📡 {len(recientes)} capítulos recientes encontrados en InManga")
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        for item in recientes:
+            manga_uuid = item["manga_uuid"]
+            cap_uuid   = item["cap_uuid"]
+            cap_numero = float(item["cap_numero"])
+
+            # Solo si el manga ya existe en BD
+            cursor.execute(
+                "SELECT id_inmanga FROM mangas WHERE id_inmanga = %s;",
+                (manga_uuid,)
+            )
+            if not cursor.fetchone():
+                print(f"  ⏭️  {item['manga_nombre']} no está en BD, ignorando.")
+                continue
+
+            # Verificar si el capítulo ya existe
+            cursor.execute(
+                "SELECT id_inmanga FROM capitulos WHERE id_inmanga = %s;",
+                (cap_uuid,)
+            )
+            if cursor.fetchone():
+                print(f"  ✅ Cap {cap_numero} ya existe, ignorando.")
+                continue
+
+            # Es nuevo → descargarlo
+            urls = generar_urls_capitulo(manga_uuid, cap_uuid)
+            cursor.execute("""
+                INSERT INTO capitulos (id_inmanga, manga_id, numero, urls_imagenes, updated_at)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (id_inmanga) DO UPDATE SET
+                    urls_imagenes = EXCLUDED.urls_imagenes,
+                    updated_at    = CURRENT_TIMESTAMP;
+            """, (cap_uuid, manga_uuid, cap_numero, json.dumps(urls)))
+
+            print(f"  🆕 Cap {cap_numero} de {item['manga_nombre']} guardado.")
+
+        conn.commit()
+        cursor.close()
+    print("✅ Novedades actualizadas.")
+
+
+
+
+
+
+
+
