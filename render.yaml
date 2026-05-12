@@ -4,10 +4,20 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PING_TOKEN
+        sync: false
 
   - type: cron
-    name: spidermanga-cron
+    name: spidermanga-novedades
     runtime: python
     buildCommand: pip install -r requirements.txt
-    schedule: "0 6 * * *"  # Cada día a las 6am
-    startCommand: python -c "import requests; requests.post('https://spidermanga-backend.onrender.com/admin/actualizar-novedades')"
+    schedule: "0 6 * * *"
+    startCommand: python -c "
+      import requests, os;
+      requests.post(
+        'https://spidermanga-backend.onrender.com/admin/actualizar-novedades',
+        timeout=30
+      )"

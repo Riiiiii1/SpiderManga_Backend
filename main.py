@@ -306,20 +306,21 @@ def capitulo_anterior(manga_id: str, numero: float):
 @app.get("/novedades")
 def novedades():
     """
-    Devuelve los mangas con capítulos actualizados
-    ordenados por el capítulo más reciente.
+    Devuelve los mangas que tienen capítulos
+    marcados como novedad (últimos 7 días).
     """
     with get_db() as conn:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
-            SELECT DISTINCT m.id_inmanga, m.nombre, m.portada_url, m.estado,
-                   MAX(c.updated_at) as ultimo_capitulo,
-                   MAX(c.numero) as ultimo_numero
+            SELECT 
+                m.id_inmanga, m.nombre, m.portada_url, m.estado,
+                MAX(c.numero) as ultimo_numero,
+                MAX(c.updated_at) as ultimo_capitulo
             FROM mangas m
             JOIN capitulos c ON c.manga_id = m.id_inmanga
+            WHERE c.es_novedad = TRUE
             GROUP BY m.id_inmanga, m.nombre, m.portada_url, m.estado
-            ORDER BY ultimo_capitulo DESC
-            LIMIT 20;
+            ORDER BY ultimo_capitulo DESC;
         """)
         resultados = cursor.fetchall()
 
@@ -397,6 +398,13 @@ def _actualizar_novedades_task():
     with get_db() as conn:
         cursor = conn.cursor()
 
+        # 1. Limpiar novedades de más de 7 días
+        cursor.execute("""
+            UPDATE capitulos SET es_novedad = FALSE
+            WHERE es_novedad = TRUE
+            AND updated_at < NOW() - INTERVAL '7 days';
+        """)
+
         for item in recientes:
             manga_uuid = item["manga_uuid"]
             cap_uuid   = item["cap_uuid"]
@@ -420,23 +428,23 @@ def _actualizar_novedades_task():
                 print(f"  ✅ Cap {cap_numero} ya existe, ignorando.")
                 continue
 
-            # Es nuevo → descargarlo
+            # Es nuevo → descargarlo y marcarlo como novedad
             urls = generar_urls_capitulo(manga_uuid, cap_uuid)
             cursor.execute("""
-                INSERT INTO capitulos (id_inmanga, manga_id, numero, urls_imagenes, updated_at)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                INSERT INTO capitulos 
+                    (id_inmanga, manga_id, numero, urls_imagenes, es_novedad, updated_at)
+                VALUES (%s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
                 ON CONFLICT (id_inmanga) DO UPDATE SET
                     urls_imagenes = EXCLUDED.urls_imagenes,
+                    es_novedad    = TRUE,
                     updated_at    = CURRENT_TIMESTAMP;
             """, (cap_uuid, manga_uuid, cap_numero, json.dumps(urls)))
 
-            print(f"  🆕 Cap {cap_numero} de {item['manga_nombre']} guardado.")
+            print(f"  🆕 Cap {cap_numero} de {item['manga_nombre']} guardado como novedad.")
 
         conn.commit()
         cursor.close()
     print("✅ Novedades actualizadas.")
-
-
 
 
 
